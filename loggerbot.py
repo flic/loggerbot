@@ -123,7 +123,7 @@ def createSlackAlertAttachment(strSourcehost,strSeverity,strSource,strMessage):
 def slackAlert(msg):
    global alertPause
    if alertPause:
-      log('info','Alerts paused, alert not sent to Slack')
+      log('info','Alerts paused in channel #%s, alert not sent to Slack' % msg['channel'])
    else:
       msg_lower = {}
       for key, value in msg.items():
@@ -166,10 +166,11 @@ def slackCmd_pause(msg):
 
 def slackCmd_resume(msg):
    global alertPause
-   sendSlackMessage(msg['channel'],"Resuming alerts")
-   log('info','Resuming alerts')
-   if msg['channel'] in alertPause:
-      del alertPause[msg['channel']]
+   channel = sc.server.channels.find(msg['channel']).name
+   sendSlackMessage(channel,"Resuming alerts in channel #%s" % channel)
+   log('info','Resuming alerts in channel #%s' % channel)
+   if channel in alertPause:
+      del alertPause[channel]
       
 def slackCmd_status(msg):      
    global alertPause
