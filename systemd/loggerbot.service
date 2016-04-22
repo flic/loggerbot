@@ -1,0 +1,15 @@
+[Unit]
+Description=Python Slack bot loggerbot
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=loggerbot
+EnvironmentFile=/etc/default/loggerbot
+ExecStart=/opt/loggerbot/loggerbot --port $httpPort --token $scToken
+Restart=on-failure
+RestartSec=10
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

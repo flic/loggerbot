@@ -6,6 +6,8 @@ from slackclient import SlackClient
 
 import time
 import re
+import sys
+import getopt
 from os import curdir, sep
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
@@ -18,13 +20,6 @@ from datetime import datetime,timedelta
 import socket
 import logging
 import logging.handlers
-
-# Slack
-scToken = ""
-
-# HTTP listener
-bindPort = 9001
-bindIP = "127.0.0.1"
 
 alertQueue = []
 alertPause = {}
@@ -46,17 +41,22 @@ handler.formatter = formatter
 logger.addHandler(handler)
 
 def log(severity,message):
-    if severity == 'info':
-       logger.info(message)
-       print "INFO: "+message
-    elif severity == 'error':
-       logger.error(message)
-       print "ERROR: "+message
+   global debug
+   
+   if severity == 'info':
+      logger.info(message)
+      if debug:
+         print "INFO: "+message
+   elif severity == 'error':
+      logger.error(message)
+      if debug:
+         print "ERROR: "+message
 
 #### HTTP Listener ####
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """Handle requests in a separate thread."""
+   address_family = socket.AF_INET6
+   """Handle requests in a separate thread."""
 
 class httpHandler(BaseHTTPRequestHandler):    
    def do_POST(self):
@@ -99,41 +99,41 @@ def sendSlackAlert(strUser,strChannel,strAttachment):
    return response
    
 def createSlackAlertAttachment(strSourcehost,strSeverity,strSource,strMessage):
-	if strSeverity == "error":
-		strColor = "danger"
-        elif strSeverity == "critical":
-                strColor = "danger"
-        elif strSeverity == "alert":
-                strColor = "danger"
-        elif strSeverity == "emergency":
-                strColor = "danger"
-	elif strSeverity == "warning":
-		strColor = "warning"
-	elif strSeverity == "info":
-		strColor = "good"
-        elif strSeverity == "notice":
-                strColor = "good"
-	else:
-		strColor = "#439FE0"
-		
-	payload = json.dumps([{"fallback":"["+strSourcehost+"]["+strSeverity+"]","pretext": "*Source: "+strSource+"*","text":"```"+strMessage+"```","color":strColor,"mrkdwn_in": ["pretext","text"],"fields": [{"title":"Host","value":strSourcehost,"short":True},{"title":"Severity","value":strSeverity,"short":True}]}])
-	return payload
-      
-def parseAlert(msg):
-   if all(msg.has_key(name) for name in ('Channel','User','Sourcehost','Severity','Source','Message')):
-      return True
+   strSeverity = strSeverity.lower()
+   if strSeverity == "error":
+      strColor = "danger"
+   elif strSeverity == "critical":
+      strColor = "danger"
+   elif strSeverity == "alert":
+      strColor = "danger"
+   elif strSeverity == "emergency":
+      strColor = "danger"
+   elif strSeverity == "warning":
+      strColor = "warning"
+   elif strSeverity == "info":
+      strColor = "good"
+   elif strSeverity == "notice":
+      strColor = "good"
    else:
-      log('error',"parseHttpMessage: missing fields in message ("+str(msg)+")")
-      return False
-      
+      strColor = "#439FE0"
+		
+   payload = json.dumps([{"fallback":"["+strSourcehost+"]["+strSeverity+"]","pretext": "*Source: "+strSource+"*","text":"```"+strMessage+"```","color":strColor,"mrkdwn_in": ["pretext","text"],"fields": [{"title":"Host","value":strSourcehost,"short":True},{"title":"Severity","value":strSeverity,"short":True}]}])
+   return payload
+            
 def slackAlert(msg):
    global alertPause
    if alertPause:
       log('info','Alerts paused, alert not sent to Slack')
    else:
-      if parseAlert:
-         attachment = createSlackAlertAttachment(msg['Sourcehost'],msg['Severity'],msg['Source'],msg['Message'])
-         response = sendSlackAlert(msg['User'],msg['Channel'],attachment)
+      msg_lower = {}
+      for key, value in msg.items():
+         msg_lower[key.lower()] = value
+         
+      if all(msg_lower.has_key(name) for name in ('channel','user','host','severity','source','message')):
+         attachment = createSlackAlertAttachment(msg_lower['host'],msg_lower['severity'],msg_lower['source'],msg_lower['message'])
+         response = sendSlackAlert(msg_lower['user'],msg_lower['channel'],attachment)
+      else:
+         log('error',"parseHttpMessage: missing fields in message ("+str(msg)+")")
 
 #### Slack Response ####
 
@@ -226,7 +226,31 @@ def parseSlackEvent(msg):
 def main():
    global sc
    global alertPause
+   global debug
    
+   debug = False
+   
+   # HTTP listener
+   bindPort = 9001
+   bindIP = "::"
+
+   scToken = ''
+
+   try:
+      opts, args = getopt.getopt(sys.argv[1:],"",["token=","port=","debug"])
+   except getopt.GetoptError:
+      print 'loggerbot --token <Slack API token> --port <listen port> --debug'
+      sys.exit(2)
+	
+   for opt, arg in opts:
+      if opt == "--token":
+         scToken = arg
+      elif opt == "--port":
+         bindPort = int(arg)
+      elif opt == "--debug":
+         debug = True
+   
+   log('info','Bind HTTP IP %s:%s' % (bindIP, str(bindPort)))
    myThread = threading.Thread(target=httpListener, args=(bindIP,bindPort))
    myThread.daemon = True
    myThread.start()
@@ -243,8 +267,8 @@ def main():
          if alertQueue:
             slackAlert(alertQueue.pop(0))
          time.sleep(1)
-      else:
-         log('error',"Connection Failed, invalid token?")
+   else:
+      log('error',"Connection Failed, invalid token?")
 
 if __name__ == '__main__':
 	main()

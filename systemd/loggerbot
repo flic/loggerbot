@@ -1,0 +1,8 @@
+# Defaults / Configuration options for loggerbot
+PATH="/usr/bin"
+
+# Slack API token
+scToken = ""
+
+# HTTP listen port
+httpPort = 9001
