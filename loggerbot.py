@@ -46,11 +46,11 @@ def log(severity,message):
    if severity == 'info':
       logger.info(message)
       if debug:
-         print "INFO: "+message
+         print("INFO: %s" % message)
    elif severity == 'error':
       logger.error(message)
       if debug:
-         print "ERROR: "+message
+         print("ERROR: %s" % message)
 
 #### HTTP Listener ####
 
@@ -90,12 +90,11 @@ def httpListener(listenIP,listenPort):
 
 def sendSlackAlert(strUser,strChannel,strAttachment):
    global sc
-   response = sc.api_call('chat.postMessage',token=scToken,channel=strChannel,text='',username=strUser,attachments=strAttachment,as_user='false')
+   response = sc.api_call('chat.postMessage',channel=strChannel,text='',username=strUser,attachments=strAttachment,as_user='false')
    if response['ok']:
       log('info',"Alert posted at: "+str(response['ts'])+" in channel "+ sc.server.channels.find(response['channel']).name)
    else:
-      log('error',response['error'])
-      log('error',response)
+      log('error',response['error']+" (Details: "+str(response)+")")
    return response
    
 def createSlackAlertAttachment(strSourcehost,strSeverity,strSource,strMessage):
