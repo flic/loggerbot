@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 import time
@@ -23,6 +23,10 @@ import logging.handlers
 
 alertQueue = []
 alertPause = {}
+
+# Ping Slack at interval, max allowed missed pings before exiting
+pingFreq = 5
+missedPings = 3
 
 helpText = "Things I understand: \n\npause <time>: _pause 15m_ - Temporarily pauses Logstash alerts\nresume: _resume_ - Resumes Logstash alerts\nstatus: _status_ - Shows paused channels"
 
@@ -51,6 +55,10 @@ def log(severity,message):
       logger.error(message)
       if debug:
          print("ERROR: %s" % message)
+   elif severity == 'debug':
+      logger.debug(message)
+      if debug:
+         print("DEBUG: %s" % message)
 
 #### HTTP Listener ####
 
@@ -196,8 +204,6 @@ def slackEvt_message(msg):
       'status': slackCmd_status,
    }
 
-#   if (msg['channel'].startswith('D')) or (sc.server.channels.find(msg['channel']).name == alertChannel):
-
    msg['text'] = msg['text'].lower()
    for a in slackCommand.keys():
       match = re.search(a,msg['text'])
@@ -205,20 +211,36 @@ def slackEvt_message(msg):
          try:
             slackCommand[match.group()](msg)
          except Exception as e:
-            print e
+            log('error','Exception: %s' % str(e))
             pass
          
+def slackEvt_pong(msg):
+   global lastPong
+   log('debug','Received Ping echo-return')
+   lastPong = int(time.time())
+   
+def slackEvt_reconnect_url(msg):
+   log('debug','Reconnect URL: %s' % msg['url'])
+
+def slackEvt_presence_change(msg):
+   log('debug','Presence change, user %s %s' % (msg['user'],msg['presence']))
+
+## ## ##
+
 def parseSlackEvent(msg):
    slackEvent = {
       'hello': slackEvt_hello,
       'message': slackEvt_message,
+      'pong': slackEvt_pong,
+      'reconnect_url': slackEvt_reconnect_url,
+      'presence_change': slackEvt_presence_change,
    }
 
    if msg:
       try:
          slackEvent[msg[0]['type']](msg[0])
       except Exception as e:
-         print str(e)
+         log('debug','Exception: %s Message: %s' % (str(e),msg))
          pass
 
 #### #### ####
@@ -227,6 +249,10 @@ def main():
    global sc
    global alertPause
    global debug
+   global lastPing
+   global lastPong
+   global pingFreq
+   global missedPings
    
    debug = False
    
@@ -249,6 +275,9 @@ def main():
          bindPort = int(arg)
       elif opt == "--debug":
          debug = True
+
+   if debug:
+      logger.setLevel(logging.DEBUG)
    
    log('info','Bind HTTP IP %s:%s' % (bindIP, str(bindPort)))
    myThread = threading.Thread(target=httpListener, args=(bindIP,bindPort))
@@ -257,7 +286,12 @@ def main():
 
    sc = SlackClient(scToken)
    if sc.rtm_connect():
+      lastPong = lastPing = int(time.time())
       while True:
+         now = int(time.time())
+         if now > lastPing + pingFreq:
+         	sc.server.ping()
+         	lastPing = now
          for key, value in alertPause.items():
             if datetime.now() > value:
                sendSlackMessage(key,"Resuming alerts")
@@ -266,6 +300,9 @@ def main():
          parseSlackEvent(sc.rtm_read())
          if alertQueue:
             slackAlert(alertQueue.pop(0))
+         if lastPong+pingFreq*missedPings < now:
+            log('error','Lost contact with Slack, exiting')
+            break;
          time.sleep(1)
    else:
       log('error',"Connection Failed, invalid token?")
